@@ -1,0 +1,16 @@
+[project]
+name = "sonora"
+version = "0.1.0"
+description = "Reproductor de audio offline-first con conversión de URL a MP3"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "yt-dlp[default]>=2025.11.12",
+    "mutagen>=1.47",
+    # Ventana de escritorio. En Linux se usa el PySide6 del sistema (pacman/apt); en macOS se instala desde PyPI.
+    "pyside6>=6.8; sys_platform == 'darwin'",
+]
+
+[tool.uv]
+package = false

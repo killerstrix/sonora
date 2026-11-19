@@ -1,0 +1,23 @@
+# Entornos de Python (Linux y macOS)
+.venv/
+.venv-macos/
+__pycache__/
+*.pyc
+
+# Música y datos personales. Por defecto viven fuera del proyecto (~/Música/Sonora o ~/Music/Sonora),
+# pero por si SONORA_MUSIC_DIR apunta aquí: canciones, historial, playlists y código de vinculación.
+*.mp3
+*.m4a
+*.opus
+*.webm
+*.flac
+*.zip
+.sonora/
+musica/
+music/
+
+# Sistema y editores
+.DS_Store
+.idea/
+.vscode/
+*.log

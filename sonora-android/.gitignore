@@ -1,0 +1,25 @@
+# Dependencias y archivos generados (se recrean con ./build-apk.sh)
+node_modules/
+www/
+
+# APK y claves de firma: la APK se publica como «Release», nunca en el código
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Música
+*.mp3
+*.m4a
+*.opus
+*.webm
+
+# Sistema y editores
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# ffmpeg con librerías alineadas a 16 KB: lo genera scripts/patch-ffmpeg-16k.sh al compilar
+android/app/src/main/jniLibs/arm64-v8a/libffmpeg.zip.so
+*.zip

@@ -1,0 +1,8 @@
+{
+  "appId": "app.sonora.player",
+  "appName": "Sonora",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#0b0b10"
+  }
+}

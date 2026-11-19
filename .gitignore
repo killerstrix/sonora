@@ -1,0 +1,7 @@
+# El repositorio solo incluye Sonora: cualquier otro proyecto de esta carpeta queda fuera.
+/*
+!/.gitignore
+!/README.md
+!/LICENSE
+!/sonora/
+!/sonora-android/
