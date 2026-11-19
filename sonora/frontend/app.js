@@ -142,12 +142,15 @@ async function loadLibrary() {
   renderSidebarPlaylists();
 }
 
-const coverUrl = t => t && t.hasCover ? (t.coverSrc || `/api/tracks/${t.id}/cover`) : null;
+// Las carátulas pueden venir de un link de playlist ajeno: solo se aceptan URL sin comillas, paréntesis,
+// espacios ni < >, porque se insertan dentro de style="background-image:url('…')".
+const safeUrl = u => typeof u === 'string' && !/["'()\\\s<>]/.test(u) ? u : null;
+const coverUrl = t => t && t.hasCover ? safeUrl(t.coverSrc || `/api/tracks/${encodeURIComponent(t.id)}/cover`) : null;
 // Si el motor web no reproduce AAC (Qt WebEngine de PyPI, en macOS), el servidor elige otro códec para el streaming.
 const NO_AAC = !document.createElement('audio').canPlayType('audio/mp4; codecs="mp4a.40.2"');
 const audioUrl = t => t.audioSrc ? t.audioSrc + (t.online && NO_AAC && t.audioSrc.startsWith('/api/stream') ? '&noaac=1' : '')
                                  : `/api/tracks/${t.id}/audio`;
-const coverStyle = t => coverUrl(t) ? `style="background-image:url('${coverUrl(t)}')"` : '';
+const coverStyle = t => coverUrl(t) ? `style="background-image:url('${esc(coverUrl(t))}')"` : '';
 const coverInner = t => coverUrl(t) ? '' : ICON.note;
 // ☁ en línea (streaming) · ⤓ descargada (MP3 en el dispositivo, suena sin conexión).
 const cloudBadge = t => !t ? '' : t.online
@@ -784,7 +787,7 @@ async function importPlaylist(data) {
     if (!/^https?:\/\//i.test(url || '')) return;
     const have = known.get(sameSource(url));
     if (have) ids[i] = have;
-    else missing.push({ i, item: { url, title, artist, duration, thumbnail: thumb || ytThumb(url) } });
+    else missing.push({ i, item: { url, title, artist, duration, thumbnail: safeUrl(thumb) || ytThumb(url) } });
   });
   if (missing.length) {
     const { ids: added } = await api('/online/bulk', { method: 'POST', body: { items: missing.map(m => m.item) } });

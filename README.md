@@ -156,12 +156,14 @@ Requisitos y primeros pasos:
 - La primera vez que reproduzcas, acepta el permiso de **notificaciones** para tener los controles con la pantalla apagada.
 - Internet solo hace falta para convertir y para el streaming; las canciones descargadas suenan sin conexión.
 
-Para compilarla:
+Para compilarla tú mismo (del código a `Sonora.apk`):
 
 ```bash
 cd sonora-android
-./build-apk.sh        # requiere Node, el SDK de Android y Java 17–21
+./build-apk.sh        # requiere Node 22+, el SDK de Android y Java 17–21
 ```
+
+La guía paso a paso (requisitos, instalación del SDK, qué hace el script y soluciones a errores comunes) está en [`sonora-android/README.md`](sonora-android/README.md#compilar-la-apk-del-código-a-sonoraapk).
 
 Más detalles en [`sonora/README.md`](sonora/README.md) y [`sonora-android/README.md`](sonora-android/README.md).
 

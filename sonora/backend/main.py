@@ -1,9 +1,12 @@
 """Sonora: servidor local que convierte URLs a MP3, indexa la biblioteca y gestiona playlists."""
 
 import hashlib
+import ipaddress
 import json
 import logging
 import os
+import re
+import socket
 import subprocess
 import sys
 import threading
@@ -11,7 +14,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 import yt_dlp
@@ -65,10 +68,21 @@ def _host_name(header: str) -> str:
     return header.split("]")[0] + "]" if header.startswith("[") else header.rsplit(":", 1)[0]
 
 
+def _foreign_origin(request: Request) -> bool:
+    """Petición lanzada por otra web abierta en el navegador (CSRF): la cabecera Host no basta para detectarla."""
+    if request.headers.get("sec-fetch-site") == "cross-site":
+        return True
+    origin = request.headers.get("origin")
+    if not origin or origin == "null":
+        return False
+    return (urlsplit(origin).hostname or "") not in {"127.0.0.1", "localhost", "::1"}
+
+
 @app.middleware("http")
 async def local_only(request: Request, call_next):
     client = request.client.host if request.client else ""
-    if client not in LOCAL_HOSTS or _host_name(request.headers.get("host", "")) not in LOCAL_NAMES:
+    if (client not in LOCAL_HOSTS or _host_name(request.headers.get("host", "")) not in LOCAL_NAMES
+            or _foreign_origin(request)):
         return JSONResponse({"detail": "Sonora solo acepta conexiones de este mismo equipo"}, status_code=403)
     return await call_next(request)
 
@@ -248,12 +262,38 @@ def _resolve(url: str, force: bool = False, no_aac: bool = False) -> dict:
     return entry
 
 
+# Las carátulas pueden venir de un link de playlist ajeno o de la página de un sitio cualquiera.
+_SAFE_THUMB = re.compile(r"https://[^\s\"'()<>\\]+")
+
+
+def _safe_thumb(url: str | None) -> str | None:
+    return url if url and _SAFE_THUMB.fullmatch(url) else None
+
+
+def _private_host(url: str, resolve: bool = False) -> bool:
+    """Destinos de la red local o de este equipo: un link de playlist ajeno no debe hacer que Sonora los pida."""
+    host = (urlsplit(url).hostname or "").lower()
+    if not host or host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".lan")):
+        return True
+    try:
+        addrs = [ipaddress.ip_address(host)]
+    except ValueError:
+        if not resolve:
+            return False
+        try:
+            addrs = [ipaddress.ip_address(a[4][0]) for a in socket.getaddrinfo(host, None)]
+        except (OSError, ValueError):
+            return False
+    return any(not a.is_global for a in addrs)
+
+
 def _track_from_meta(meta: dict, track_id: str, added_at: float) -> dict:
+    thumb = _safe_thumb(meta.get("thumbnail"))
     return {
         "id": track_id, "online": True, "url": meta["url"],
         "title": meta["title"], "artist": meta["artist"], "album": meta.get("album", ""),
         "duration": meta.get("duration") or 0, "quality": meta.get("quality", ""),
-        "hasCover": bool(meta.get("thumbnail")), "coverSrc": meta.get("thumbnail"),
+        "hasCover": bool(thumb), "coverSrc": thumb,
         "audioSrc": "/api/stream?url=" + quote(meta["url"], safe=""),
         "addedAt": added_at,
     }
@@ -341,9 +381,12 @@ def add_online_bulk(body: OnlineBulkIn):
         known = {o["id"] for o in items}
         for i, it in enumerate(body.items[:1000]):
             url = _check_url(it.url)
+            if _private_host(url):
+                ids.append(None)  # se mantiene la posición: la interfaz empareja los ids por orden
+                continue
             track_id = _online_id(url)
             if track_id not in known:
-                thumb = it.thumbnail if (it.thumbnail or "").startswith("https://") else None
+                thumb = _safe_thumb(it.thumbnail)
                 items.insert(0, {"url": url, "title": it.title[:300] or url, "artist": it.artist[:200], "album": "",
                                  "duration": max(0.0, it.duration or 0), "thumbnail": thumb, "quality": "",
                                  "id": track_id, "addedAt": now - i / 1000})
@@ -433,6 +476,9 @@ def _set_prepare(key: tuple[str, bool], state: str, error: str | None = None) ->
 def _prepare(url: str, no_aac: bool) -> None:
     key = (url, no_aac)
     _set_prepare(key, "preparing")
+    if _private_host(url, resolve=True):
+        _set_prepare(key, "error", "No se preparan enlaces de la red local")
+        return
     try:
         entry = _resolve(url, no_aac=no_aac)
         problem = None if entry.get("warm") else _warm(entry)

@@ -74,12 +74,24 @@
   const saveOnline = items => Sonora.writeData({ name: 'online', data: JSON.stringify(items) });
   const onlineId = url => 'o' + trackId(url).slice(0, 15);
 
+  // Las carátulas pueden venir de un link de playlist ajeno o de la página de un sitio cualquiera.
+  const safeThumb = u => typeof u === 'string' && /^https:\/\/[^\s"'()<>\\]+$/.test(u) ? u : null;
+  // Destinos de la red local o del propio teléfono: un link de playlist ajeno no debe hacer que la app los pida.
+  function privateHost(url) {
+    let h;
+    try { h = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, ''); } catch { return true; }
+    return !h || h === 'localhost' || /\.(localhost|local|internal|lan)$/.test(h)
+      || /^(127\.|10\.|192\.168\.|169\.254\.|0\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(h)
+      || /^(::1?|f[cd][0-9a-f]{2}:|fe80:)/.test(h);
+  }
+
   function onlineTrack(meta, id, addedAt) {
+    const thumb = safeThumb(meta.thumbnail);
     return {
       id, online: true, url: meta.url,
       title: meta.title, artist: meta.artist || '', album: meta.album || '',
       duration: meta.duration || 0, quality: meta.quality || '',
-      hasCover: !!meta.thumbnail, coverSrc: meta.thumbnail || null, art: meta.thumbnail || null, addedAt,
+      hasCover: !!thumb, coverSrc: thumb, art: thumb, addedAt,
     };
   }
 
@@ -164,6 +176,7 @@
     let queued = 0;
     for (const url of new Set(urls || [])) {
       if (!/^https?:\/\//i.test(url || '')) continue;
+      if (privateHost(url)) { prepState.set(url, { state: 'error', error: 'No se preparan enlaces de la red local' }); continue; }
       const st = prepState.get(url)?.state;
       if (st === 'queued' || st === 'preparing' || (st === 'ready' && valid(direct.get(url)))) continue;
       prepRetried.delete(url); // una petición nueva vuelve a tener su reintento
@@ -226,12 +239,12 @@
     const ids = [];
     const now = Date.now() / 1000;
     list.slice(0, 1000).forEach((it, i) => {
-      if (!/^https?:\/\//i.test(it.url || '')) return;
+      if (!/^https?:\/\//i.test(it.url || '') || privateHost(it.url)) { ids.push(null); return; }
       const id = onlineId(it.url);
       if (!known.has(id)) {
         items.unshift({ url: it.url, title: (it.title || it.url).slice(0, 300), artist: (it.artist || '').slice(0, 200),
                         album: '', duration: Math.max(0, +it.duration || 0), quality: '',
-                        thumbnail: /^https:\/\//.test(it.thumbnail || '') ? it.thumbnail : null,
+                        thumbnail: safeThumb(it.thumbnail),
                         id, addedAt: now - i / 1000 });
         known.add(id);
       }
