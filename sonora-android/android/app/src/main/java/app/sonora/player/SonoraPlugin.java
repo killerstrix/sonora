@@ -30,6 +30,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -158,6 +159,7 @@ public class SonoraPlugin extends Plugin {
         emit(id, "queued", 0f, null);
         convertExec.submit(() -> {
             try {
+                if (isPrivateHost(url)) throw new Exception(LOCAL_NETWORK);
                 ensureEngine();
                 emit(id, "downloading", 0f, null);
                 long startedAt = System.currentTimeMillis();
@@ -273,6 +275,31 @@ public class SonoraPlugin extends Plugin {
         return url != null && (url.startsWith("http://") || url.startsWith("https://"));
     }
 
+    private static final String LOCAL_NETWORK = "No se aceptan enlaces de la red local ni de este teléfono";
+
+    /**
+     * Destinos de la red local o del propio teléfono (resolviendo el nombre): un link de playlist ajeno
+     * no debe hacer que la app los pida. Se comprueba la URL de origen y el enlace directo del audio.
+     */
+    private static boolean isPrivateHost(String url) {
+        try {
+            String host = new URL(url).getHost();
+            if (host == null || host.isEmpty()) return true;
+            for (InetAddress a : InetAddress.getAllByName(host)) {
+                if (a.isLoopbackAddress() || a.isSiteLocalAddress() || a.isLinkLocalAddress()
+                        || a.isAnyLocalAddress() || a.isMulticastAddress()) return true;
+                byte[] b = a.getAddress();
+                if (b.length == 4 && (b[0] & 0xff) == 100 && (b[1] & 0xc0) == 64) return true;  // 100.64.0.0/10
+                if (b.length == 16 && (b[0] & 0xfe) == 0xfc) return true;                       // fc00::/7
+            }
+            return false;
+        } catch (java.net.UnknownHostException e) {
+            return false;  // sin red o nombre inexistente: yt-dlp dará su propio error
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
     /**
      * Obtiene el enlace directo del mejor audio (formato original, sin recodificar) y sus metadatos.
      * Solo formatos HTTP directos: las listas HLS no se pueden reproducir en el reproductor de la app.
@@ -339,11 +366,13 @@ public class SonoraPlugin extends Plugin {
      * Se pide el primer byte (con las cabeceras de yt-dlp) hasta recibir 2xx. Devuelve el problema o null.
      */
     private static String warm(String direct, JSObject headers) {
+        if (isPrivateHost(direct)) return LOCAL_NETWORK;
         String problem = "";
         for (int retry = 0; retry < 8; retry++) {
             HttpURLConnection con = null;
             try {
                 con = (HttpURLConnection) new URL(direct).openConnection();
+                con.setInstanceFollowRedirects(false);  // un salto podría llevar a la red local
                 con.setConnectTimeout(10000);
                 con.setReadTimeout(15000);
                 if (headers != null) {
@@ -376,6 +405,7 @@ public class SonoraPlugin extends Plugin {
     }
 
     private JSObject resolveInfo(String url) throws Exception {
+        if (isPrivateHost(url)) throw new Exception(LOCAL_NETWORK);
         ensureEngine();
         YoutubeDLRequest req = new YoutubeDLRequest(url);
         req.addOption("--no-playlist");
@@ -392,6 +422,7 @@ public class SonoraPlugin extends Plugin {
         JSONObject info = new JSONObject(resp.getOut());
         String direct = info.optString("url", "");
         if (direct.isEmpty()) throw new Exception("Ese enlace no tiene un audio que se pueda escuchar directamente");
+        if (!isHttp(direct) || isPrivateHost(direct)) throw new Exception("El audio de ese enlace apunta a la red local");
 
         long expires = System.currentTimeMillis() / 1000 + 1800;
         for (String part : direct.substring(direct.indexOf('?') + 1).split("&")) {

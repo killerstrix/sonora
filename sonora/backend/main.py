@@ -227,6 +227,9 @@ def _resolve(url: str, force: bool = False, no_aac: bool = False) -> dict:
         cached = _stream_cache.get(key)
     if cached and not force and cached["expires"] > time.time() + 120:
         return cached
+    # Todo lo que se escucha por streaming pasa por aquí: también las canciones de un link de playlist ajeno.
+    if _private_host(url, resolve=True):
+        raise HTTPException(400, "No se aceptan enlaces de la red local ni de este equipo")
     opts = {"format": STREAM_FORMAT_NO_AAC if no_aac else STREAM_FORMAT,
             "noplaylist": True, "quiet": True, "noprogress": True,
             "js_runtimes": {"deno": {}, "node": {}}}
@@ -237,6 +240,9 @@ def _resolve(url: str, force: bool = False, no_aac: bool = False) -> dict:
         raise HTTPException(400, _ydl_error(e) or "No se pudo leer ese enlace")
     if info.get("_type") == "playlist" or not info.get("url"):
         raise HTTPException(400, "Ese enlace no tiene un audio que se pueda escuchar directamente")
+    # El enlace directo lo decide el sitio (o su página): tampoco puede apuntar a la red local.
+    if not info["url"].startswith(("http://", "https://")) or _private_host(info["url"], resolve=True):
+        raise HTTPException(400, "El audio de ese enlace apunta a la red local")
     expires = time.time() + 1800
     for part in info["url"].split("?", 1)[-1].split("&"):  # p. ej. YouTube: …&expire=1700000000&…
         if part.startswith("expire=") and part[7:].isdigit():
@@ -285,6 +291,20 @@ def _private_host(url: str, resolve: bool = False) -> bool:
         except (OSError, ValueError):
             return False
     return any(not a.is_global for a in addrs)
+
+
+def _get_public(url: str, headers: dict, **kwargs) -> requests.Response:
+    """requests.get que sigue las redirecciones a mano y comprueba que ningún salto lleve a la red local."""
+    for _ in range(5):
+        if _private_host(url, resolve=True):
+            raise requests.ConnectionError("destino en la red local")
+        r = requests.get(url, headers=headers, allow_redirects=False, **kwargs)
+        if r.is_redirect and r.headers.get("location"):
+            url = requests.compat.urljoin(url, r.headers["location"])
+            r.close()
+            continue
+        return r
+    raise requests.TooManyRedirects("demasiadas redirecciones")
 
 
 def _track_from_meta(meta: dict, track_id: str, added_at: float) -> dict:
@@ -414,7 +434,7 @@ def stream(url: str, request: Request, noaac: bool = False):
         for retry in range(6):
             attempt += 1
             try:
-                upstream = requests.get(entry["direct"], headers=headers, stream=True, timeout=(10, 30))
+                upstream = _get_public(entry["direct"], headers, stream=True, timeout=(10, 30))
             except requests.RequestException as e:
                 upstream, problem = None, f"conexión: {type(e).__name__}"
             else:
@@ -456,7 +476,7 @@ def _warm(entry: dict) -> str | None:
     problem = ""
     for retry in range(8):
         try:
-            with requests.get(entry["direct"], headers=headers, stream=True, timeout=(10, 15)) as r:
+            with _get_public(entry["direct"], headers, stream=True, timeout=(10, 15)) as r:
                 if r.status_code < 400:
                     entry["warm"] = True
                     return None
@@ -476,9 +496,6 @@ def _set_prepare(key: tuple[str, bool], state: str, error: str | None = None) ->
 def _prepare(url: str, no_aac: bool) -> None:
     key = (url, no_aac)
     _set_prepare(key, "preparing")
-    if _private_host(url, resolve=True):
-        _set_prepare(key, "error", "No se preparan enlaces de la red local")
-        return
     try:
         entry = _resolve(url, no_aac=no_aac)
         problem = None if entry.get("warm") else _warm(entry)
@@ -758,6 +775,8 @@ def _run_download(job_id: str, url: str, replace_id: str | None = None) -> None:
 
 
 def _start_job(url: str, replace_id: str | None = None) -> dict:
+    if _private_host(url, resolve=True):
+        raise HTTPException(400, "No se aceptan enlaces de la red local ni de este equipo")
     job_id = uuid.uuid4().hex[:12]
     with _jobs_lock:
         _jobs[job_id] = {"id": job_id, "url": url, "title": url, "status": "queued",

@@ -120,6 +120,7 @@
 
   // Resuelve y calienta en una sola llamada; si ya hay un enlace vigente, solo lo calienta.
   async function prepareLocal(url) {
+    if (privateHost(url)) throw new Error('No se aceptan enlaces de la red local ni de este teléfono');
     const cur = direct.get(url);
     if (valid(cur) && cur.warm) return cur;
     let r;
@@ -202,6 +203,7 @@
   async function getMeta(url) {
     url = (url || '').trim();
     if (!/^https?:\/\//i.test(url)) throw new Error('Introduce una URL válida (http/https)');
+    if (privateHost(url)) throw new Error('No se aceptan enlaces de la red local ni de este teléfono');
     const r = await resolveLocal(url);
     return { url, title: r.title, artist: r.artist, album: r.album, duration: r.duration, thumbnail: r.thumbnail, quality: r.quality };
   }
